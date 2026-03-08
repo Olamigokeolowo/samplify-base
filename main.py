@@ -1,43 +1,27 @@
+from contextlib import asynccontextmanager
+from typing import List
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
-import psycopg2
-from dotenv import load_dotenv
-import os
-from contextlib import asynccontextmanager
-from routes import products
 
-# Load environment variables
-load_dotenv()
-
-def get_db_connection():
-    """Establishes and returns a database connection."""
-    try:
-        conn = psycopg2.connect(
-            user=os.getenv("user"),
-            password=os.getenv("password"),
-            host=os.getenv("host"),
-            port=os.getenv("port"),
-            dbname=os.getenv("dbname")
-        )
-        return conn
-    except Exception as e:
-        print(f"Database connection failed: {e}")
-        return None
+from cart_store import carts, get_user_cart
+from db import get_db_connection, init_auth_tables, init_payment_tables
+from routes import auth, payments, products
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Verify database connection
     print("Connecting to database...")
     conn = get_db_connection()
     if conn:
         print("Connection successful!")
         conn.close()
+        init_auth_tables()
+        init_payment_tables()
+        print("Payment tables ready.")
     else:
         print("Warning: Could not connect to database on startup.")
     yield
-    # Shutdown logic (if any) can go here
 
 app = FastAPI(lifespan=lifespan)
 
@@ -49,7 +33,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://localhost:5174/",
+        "http://localhost:5173",
+        "http://localhost:5174",
         "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
@@ -58,7 +43,8 @@ app.add_middleware(
 )
 
 app.include_router(products.router)
-
+app.include_router(auth.router)
+app.include_router(payments.router)
 # ========================
 # Models
 # ========================
@@ -81,17 +67,6 @@ class AddToCartRequest(BaseModel):
 
 class UpdateQuantityRequest(BaseModel):
     action: str  # "increase" or "decrease"
-
-
-# ========================
-# In-memory storage
-# ========================
-carts = {}
-
-def get_user_cart(user_id: str = "default_user"):
-    if user_id not in carts:
-        carts[user_id] = []
-    return carts[user_id]
 
 
 # ========================
